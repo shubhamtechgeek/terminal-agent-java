@@ -1,17 +1,25 @@
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
-import com.openai.core.JsonField;
 import com.openai.core.JsonValue;
 import com.openai.models.FunctionDefinition;
 import com.openai.models.FunctionParameters;
 import com.openai.models.chat.completions.ChatCompletion;
 import com.openai.models.chat.completions.ChatCompletionCreateParams;
+import com.openai.models.chat.completions.ChatCompletionMessage;
+import com.openai.models.chat.completions.ChatCompletionMessageToolCall;
 import com.openai.models.chat.completions.ChatCompletionTool;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 public class Main {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         if (args.length < 2 || !"-p".equals(args[0])) {
             System.err.println("Usage: program -p <prompt>");
             System.exit(1);
@@ -45,10 +53,6 @@ public class Main {
                 .putAdditionalProperty("required", JsonValue.from(List.of("file_path")))
                 .build();
 
-
-
-
-
         ChatCompletionTool tool =
             ChatCompletionTool.builder()
                 .type(JsonValue.from("function"))
@@ -68,7 +72,28 @@ public class Main {
                         .build()
         );
 
-        if (response.choices().isEmpty()) {
+        ChatCompletionMessage message = response.choices().get(0).message();
+        Optional<List<ChatCompletionMessageToolCall>> toolCallsOpt = message.toolCalls();
+
+        if (toolCallsOpt.isPresent() && !toolCallsOpt.get().isEmpty()) {
+            ChatCompletionMessageToolCall toolCall = toolCallsOpt.get().get(0);
+            String functionName = toolCall.function().name();
+
+            if ("Read".equals(functionName)) {
+                // 1. Parse the JSON arguments string
+                String argumentsJson = toolCall.function().arguments();
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode argsNode = mapper.readTree(argumentsJson);
+                String filePath = argsNode.get("file_path").asText();
+
+                // 2. Read the file contents and print raw output to stdout
+                String content = Files.readString(Path.of(filePath));
+                System.out.print(content);
+            }
+        }
+
+
+            if (response.choices().isEmpty()) {
             throw new RuntimeException("no choices in response");
         }
 
@@ -76,6 +101,6 @@ public class Main {
         System.err.println("Logs from your program will appear here!");
 
         // TODO: Uncomment the line below to pass the first stage
-         System.out.print(response.choices().get(0).message().content().orElse(""));
+         System.out.print(response.choices().getFirst().message().content().orElse(""));
     }
 }

@@ -10,8 +10,15 @@ import com.openai.models.chat.completions.ChatCompletionCreateParams;
 import com.openai.models.chat.completions.ChatCompletionMessage;
 import com.openai.models.chat.completions.ChatCompletionMessageToolCall;
 import com.openai.models.chat.completions.ChatCompletionTool;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
-void main(String[] args) throws IOException {
+public class Main {
+    static void main(String[] args) throws IOException {
         if (args.length < 2 || !"-p".equals(args[0])) {
             System.err.println("Usage: program -p <prompt>");
             System.exit(1);
@@ -94,3 +101,4 @@ void main(String[] args) throws IOException {
         // TODO: Uncomment the line below to pass the first stage
          System.out.print(response.choices().getFirst().message().content().orElse(""));
     }
+}

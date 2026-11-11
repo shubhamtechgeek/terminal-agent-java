@@ -1,4 +1,3 @@
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.client.OpenAIClient;
@@ -11,15 +10,8 @@ import com.openai.models.chat.completions.ChatCompletionCreateParams;
 import com.openai.models.chat.completions.ChatCompletionMessage;
 import com.openai.models.chat.completions.ChatCompletionMessageToolCall;
 import com.openai.models.chat.completions.ChatCompletionTool;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 
-public class Main {
-    public static void main(String[] args) throws IOException {
+void main(String[] args) throws IOException {
         if (args.length < 2 || !"-p".equals(args[0])) {
             System.err.println("Usage: program -p <prompt>");
             System.exit(1);
@@ -72,11 +64,11 @@ public class Main {
                         .build()
         );
 
-        ChatCompletionMessage message = response.choices().get(0).message();
+        ChatCompletionMessage message = response.choices().getFirst().message();
         Optional<List<ChatCompletionMessageToolCall>> toolCallsOpt = message.toolCalls();
 
         if (toolCallsOpt.isPresent() && !toolCallsOpt.get().isEmpty()) {
-            ChatCompletionMessageToolCall toolCall = toolCallsOpt.get().get(0);
+            ChatCompletionMessageToolCall toolCall = toolCallsOpt.get().getFirst();
             String functionName = toolCall.function().name();
 
             if ("Read".equals(functionName)) {
@@ -92,7 +84,6 @@ public class Main {
             }
         }
 
-
             if (response.choices().isEmpty()) {
             throw new RuntimeException("no choices in response");
         }
@@ -103,4 +94,3 @@ public class Main {
         // TODO: Uncomment the line below to pass the first stage
          System.out.print(response.choices().getFirst().message().content().orElse(""));
     }
-}

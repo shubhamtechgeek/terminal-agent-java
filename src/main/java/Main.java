@@ -5,19 +5,28 @@ import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.JsonValue;
 import com.openai.models.FunctionDefinition;
 import com.openai.models.FunctionParameters;
+import com.openai.models.beta.threads.messages.Message;
 import com.openai.models.chat.completions.ChatCompletion;
+import com.openai.models.chat.completions.ChatCompletionAssistantMessageParam;
 import com.openai.models.chat.completions.ChatCompletionCreateParams;
 import com.openai.models.chat.completions.ChatCompletionMessage;
+import com.openai.models.chat.completions.ChatCompletionMessageParam;
 import com.openai.models.chat.completions.ChatCompletionMessageToolCall;
 import com.openai.models.chat.completions.ChatCompletionTool;
+import com.openai.models.chat.completions.ChatCompletionToolMessageParam;
+import com.openai.models.chat.completions.ChatCompletionUserMessageParam;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 public class Main {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     static void main(String[] args) throws IOException {
         if (args.length < 2 || !"-p".equals(args[0])) {
             System.err.println("Usage: program -p <prompt>");
@@ -63,19 +72,61 @@ public class Main {
                         .build())
                 .build();
 
-        ChatCompletion response = client.chat().completions().create(
+        //initialize conversation
+        List<ChatCompletionMessageParam> messages = new ArrayList<>();
+        messages.add(ChatCompletionMessageParam.ofUser(
+            ChatCompletionUserMessageParam.builder()
+                .content(prompt)
+                .build()
+        ));
+
+
+        //implement agent loop
+        while (true){
+
+            ChatCompletion response = client.chat().completions().create(
                 ChatCompletionCreateParams.builder()
-                        .model("anthropic/claude-haiku-4.5")
-                        .addUserMessage(prompt)
-                        .addTool(tool)
+                    .model("anthropic/claude-haiku-4.5")
+                    .addUserMessage(prompt)
+                    .addTool(tool)
+                    .build()
+            );
+
+            if (response.choices().isEmpty()) {
+                throw new RuntimeException("no choices in response");
+            }
+
+            ChatCompletionMessage assistantMessage = response.choices().getFirst().message();
+
+            //maintain conversation history
+            messages.add(ChatCompletionMessageParam.ofAssistant(assistantMessage.toParam()));
+
+            Optional<List<ChatCompletionMessageToolCall>> toolCallsOpt = assistantMessage.toolCalls();
+
+            //exit if not tool calls.
+            if(toolCallsOpt.isEmpty() || toolCallsOpt.get().isEmpty()){
+                System.out.print(assistantMessage.content().orElse(""));
+                break;
+            }
+
+            //execute all tool calls:
+            for(ChatCompletionMessageToolCall toolCall : toolCallsOpt.get()){
+
+                String result = toolCall(toolCall);
+
+                messages.add(ChatCompletionMessageParam.ofTool(
+                    ChatCompletionToolMessageParam.builder()
+                        .toolCallId(toolCall.id())
+                        .content(result)
                         .build()
-        );
+                ));
+            }
+        }
+    }
 
-        ChatCompletionMessage message = response.choices().getFirst().message();
-        Optional<List<ChatCompletionMessageToolCall>> toolCallsOpt = message.toolCalls();
 
-        if (toolCallsOpt.isPresent() && !toolCallsOpt.get().isEmpty()) {
-            ChatCompletionMessageToolCall toolCall = toolCallsOpt.get().getFirst();
+    static String toolCall(ChatCompletionMessageToolCall toolCall) throws IOException {
+
             String functionName = toolCall.function().name();
 
             if ("Read".equals(functionName)) {
@@ -86,19 +137,11 @@ public class Main {
                 String filePath = argsNode.get("file_path").asText();
 
                 // 2. Read the file contents and print raw output to stdout
-                String content = Files.readString(Path.of(filePath));
-                System.out.print(content);
+                return Files.readString(Path.of(filePath));
+
             }
-        }
 
-            if (response.choices().isEmpty()) {
-            throw new RuntimeException("no choices in response");
-        }
-
-        // You can use print statements as follows for debugging, they'll be visible when running tests.
-        System.err.println("Logs from your program will appear here!");
-
-        // TODO: Uncomment the line below to pass the first stage
-         System.out.print(response.choices().getFirst().message().content().orElse(""));
+            throw new IllegalArgumentException("Unknown tool: " + functionName);
     }
+
 }

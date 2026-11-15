@@ -126,7 +126,26 @@ public class Main {
 
         //extract system prompt from .claude/skills/ folder
         Path projectRoot = Paths.get(".");
-        String systemPrompt = buildSystemPrompt(projectRoot);
+        Path skillsDir = projectRoot.resolve(".claude/skills");
+        String systemPrompt = buildSystemPrompt(skillsDir);
+
+        if (userPrompt.startsWith("/")) {
+            String trimmedPrompt = userPrompt.trim();
+            String command = trimmedPrompt.substring(1).split("\\s+")[0];
+            String argsPart = trimmedPrompt.substring(1 + command.length()).trim();
+
+            for (Skill skill : loadSkills(skillsDir)) {
+                if (skill.name.equalsIgnoreCase(command)
+                    || skill.path().toString().equalsIgnoreCase(command)) {
+                    if (argsPart.isEmpty()) {
+                        userPrompt = skill.body;
+                    } else {
+                        userPrompt = skill.body + "\n\n" + argsPart;
+                    }
+                    break;
+                }
+            }
+        }
 
         //initialize conversation
         List<ChatCompletionMessageParam> messages = new ArrayList<>();
@@ -187,20 +206,23 @@ public class Main {
         }
     }
 
-    public record SkillMetadata(String name, String description, Path path) {}
+    public record Skill(String name, String description, String body, Path path) {}
 
-    private static String buildSystemPrompt(Path projectRoot) throws IOException {
+    private static String buildSystemPrompt(Path skillsDir) throws IOException {
 
-        Path skillsDir = projectRoot.resolve(".claude/skills");
-        List<SkillMetadata> skills = loadSkills(skillsDir);
+        Path projectRoot = Paths.get(".");
 
-        if (skills.isEmpty()){
-            return "";
-        }
+        List<Skill> skills = loadSkills(skillsDir);
 
         StringBuilder prompt = new StringBuilder();
 
-        for (SkillMetadata skill : skills) {
+        prompt.append("You have access to the following skills:\n\n");
+
+        if (skills.isEmpty()){
+            return prompt.toString();
+        }
+
+        for (Skill skill : skills) {
             prompt.append(String.format("- **%s**: %s (Path: `%s`)\n",
                 skill.name(),
                 skill.description(),
@@ -210,13 +232,13 @@ public class Main {
         return prompt.toString();
     }
 
-    private static List<SkillMetadata> loadSkills(Path skillsDir) throws IOException {
+    private static List<Skill> loadSkills(Path skillsDir) throws IOException {
 
 
-        List<SkillMetadata> skills = new ArrayList<>();
+        List<Skill> Skill = new ArrayList<>();
 
         if(!Files.exists(skillsDir) || !Files.isDirectory(skillsDir)){
-            return skills;
+            return Skill;
         }
 
         try(Stream<Path> entries = Files.list(skillsDir)) {
@@ -224,20 +246,20 @@ public class Main {
             for(Path entry : entries.filter(Files::isDirectory).toList()){
                 Path skillFile = entry.resolve("SKILL.md");
                 if(Files.exists(skillFile)){
-                    SkillMetadata metadata = parseFrontmatter(skillFile);
+                    Skill metadata = parseFrontmatter(skillFile);
                     if (metadata != null) {
-                        skills.add(metadata);
+                        Skill.add(metadata);
                     }
                 }
             }
 
         }
 
-        return skills;
+        return Skill;
 
     }
 
-    private static SkillMetadata parseFrontmatter(Path skillFile) throws IOException {
+    private static Skill parseFrontmatter(Path skillFile) throws IOException {
 
         List<String> lines = Files.readAllLines(skillFile);
         if (lines.isEmpty() || !lines.getFirst().trim().equals("---")) {
@@ -246,6 +268,7 @@ public class Main {
 
         String name = null;
         String description = null;
+        StringBuilder body = null;
 
         // Start at line 1 (after opening ---) and stop at closing ---
         for (int i = 1; i < lines.size(); i++) {
@@ -257,11 +280,19 @@ public class Main {
                 name = line.substring("name:".length()).trim();
             } else if (line.startsWith("description:")) {
                 description = line.substring("description:".length()).trim();
+            }else{
+                while(i < lines.size()){
+                    body.append(line.trim());
+                    i++;
+                }
             }
+
+
+
         }
 
-        if (name != null && description != null) {
-            return new SkillMetadata(name, description, skillFile);
+        if (name != null && description != null && body != null) {
+            return new Skill(name, description, body.toString(), skillFile);
         }
         return null;
     }

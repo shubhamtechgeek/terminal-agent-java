@@ -10,16 +10,19 @@ import com.openai.models.chat.completions.ChatCompletionCreateParams;
 import com.openai.models.chat.completions.ChatCompletionMessage;
 import com.openai.models.chat.completions.ChatCompletionMessageParam;
 import com.openai.models.chat.completions.ChatCompletionMessageToolCall;
+import com.openai.models.chat.completions.ChatCompletionSystemMessageParam;
 import com.openai.models.chat.completions.ChatCompletionTool;
 import com.openai.models.chat.completions.ChatCompletionToolMessageParam;
 import com.openai.models.chat.completions.ChatCompletionUserMessageParam;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 public class Main {
 
@@ -29,7 +32,7 @@ public class Main {
             System.exit(1);
         }
 
-        String prompt = args[1];
+        String userPrompt = args[1];
 
         String apiKey = System.getenv("OPENROUTER_API_KEY");
         String baseUrl = System.getenv("OPENROUTER_BASE_URL");
@@ -121,12 +124,20 @@ public class Main {
                 .build();
 
 
+        //extract system prompt from .claude/skills/ folder
+        Path projectRoot = Paths.get(".");
+        String systemPrompt = buildSystemPrompt(projectRoot);
 
         //initialize conversation
         List<ChatCompletionMessageParam> messages = new ArrayList<>();
+        messages.add(ChatCompletionMessageParam.ofSystem(
+            ChatCompletionSystemMessageParam.builder()
+                .content(systemPrompt)
+                .build()
+        ));
         messages.add(ChatCompletionMessageParam.ofUser(
             ChatCompletionUserMessageParam.builder()
-                .content(prompt)
+                .content(userPrompt)
                 .build()
         ));
 
@@ -176,13 +187,93 @@ public class Main {
         }
     }
 
+    public record SkillMetadata(String name, String description, Path path) {}
+
+    private static String buildSystemPrompt(Path projectRoot) throws IOException {
+
+        Path skillsDir = projectRoot.resolve(".claude/skills");
+        List<SkillMetadata> skills = loadSkills(skillsDir);
+
+        if (skills.isEmpty()){
+            return "";
+        }
+
+        StringBuilder prompt = new StringBuilder();
+
+        for (SkillMetadata skill : skills) {
+            prompt.append(String.format("- **%s**: %s (Path: `%s`)\n",
+                skill.name(),
+                skill.description(),
+                projectRoot.relativize(skill.path())));
+        }
+
+        return prompt.toString();
+    }
+
+    private static List<SkillMetadata> loadSkills(Path skillsDir) throws IOException {
+
+
+        List<SkillMetadata> skills = new ArrayList<>();
+
+        if(!Files.exists(skillsDir) || !Files.isDirectory(skillsDir)){
+            return skills;
+        }
+
+        try(Stream<Path> entries = Files.list(skillsDir)) {
+
+            for(Path entry : entries.filter(Files::isDirectory).toList()){
+                Path skillFile = entry.resolve("SKILL.md");
+                if(Files.exists(skillFile)){
+                    SkillMetadata metadata = parseFrontmatter(skillFile);
+                    if (metadata != null) {
+                        skills.add(metadata);
+                    }
+                }
+            }
+
+        }
+
+        return skills;
+
+    }
+
+    private static SkillMetadata parseFrontmatter(Path skillFile) throws IOException {
+
+        List<String> lines = Files.readAllLines(skillFile);
+        if (lines.isEmpty() || !lines.getFirst().trim().equals("---")) {
+            return null;
+        }
+
+        String name = null;
+        String description = null;
+
+        // Start at line 1 (after opening ---) and stop at closing ---
+        for (int i = 1; i < lines.size(); i++) {
+            String line = lines.get(i).trim();
+            if (line.equals("---")) {
+                break; // Stop reading before the body (Level 2)
+            }
+            if (line.startsWith("name:")) {
+                name = line.substring("name:".length()).trim();
+            } else if (line.startsWith("description:")) {
+                description = line.substring("description:".length()).trim();
+            }
+        }
+
+        if (name != null && description != null) {
+            return new SkillMetadata(name, description, skillFile);
+        }
+        return null;
+    }
+
 
     static String toolCall(ChatCompletionMessageToolCall toolCall)
         throws IOException, InterruptedException {
 
             String functionName = toolCall.function().name();
 
-            if ("Read".equals(functionName)) {
+        switch (functionName) {
+            case "Read" -> {
                 // 1. Parse the JSON arguments string
                 String argumentsJson = toolCall.function().arguments();
                 ObjectMapper mapper = new ObjectMapper();
@@ -192,7 +283,8 @@ public class Main {
                 // 2. Read the file contents and print raw output to stdout
                 return Files.readString(Path.of(filePath));
 
-            } else if ("Write".equals(functionName)) {
+            }
+            case "Write" -> {
 
                 //1. Parse the JSON arguments string
                 String argumentsJson = toolCall.function().arguments();
@@ -201,12 +293,13 @@ public class Main {
                 String filePath = argsNode.get("file_path").asText();
                 String content = argsNode.get("content").asText();
                 Path path = Path.of(filePath);
-                if(!Files.exists(path)){
+                if (!Files.exists(path)) {
                     Files.createFile(path);
                 }
                 return String.valueOf(Files.writeString(path, content));
 
-            } else if ("Bash".equals(functionName)) {
+            }
+            case "Bash" -> {
 
                 // 1. Parse the JSON arguments string
                 String argumentsJson = toolCall.function().arguments();
@@ -223,7 +316,8 @@ public class Main {
 
                 try {
                     Process process = processBuilder.start();
-                    String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                    String output = new String(process.getInputStream().readAllBytes(),
+                        java.nio.charset.StandardCharsets.UTF_8);
                     int exitCode = process.waitFor();
 
                     if (exitCode != 0 && output.isEmpty()) {
@@ -235,6 +329,7 @@ public class Main {
                 }
 
             }
+        }
 
         throw new IllegalArgumentException("Unknown tool: " + functionName);
     }

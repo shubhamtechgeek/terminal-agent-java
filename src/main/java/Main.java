@@ -26,7 +26,7 @@ import java.util.stream.Stream;
 
 public class Main {
 
-    static void main(String[] args) throws IOException, InterruptedException {
+    static void main(String[] args) throws IOException {
         if (args.length < 2 || !"-p".equals(args[0])) {
             System.err.println("Usage: program -p <prompt>");
             System.exit(1);
@@ -268,38 +268,37 @@ public class Main {
 
         String name = null;
         String description = null;
-        StringBuilder body = null;
+        int lastIndex = -1;
 
-        // Start at line 1 (after opening ---) and stop at closing ---
+
         for (int i = 1; i < lines.size(); i++) {
             String line = lines.get(i).trim();
             if (line.equals("---")) {
-                break; // Stop reading before the body (Level 2)
+                lastIndex = i;
+                break;
             }
             if (line.startsWith("name:")) {
                 name = line.substring("name:".length()).trim();
             } else if (line.startsWith("description:")) {
                 description = line.substring("description:".length()).trim();
-            }else{
-                while(i < lines.size()){
-                    body.append(line.trim());
-                    i++;
-                }
             }
-
-
-
         }
 
-        if (name != null && description != null && body != null) {
-            return new Skill(name, description, body.toString(), skillFile);
+        if (lastIndex == -1 || name == null || description == null) {
+            return null;
         }
-        return null;
+
+        StringBuilder body = new StringBuilder();
+        for (int i = lastIndex + 1; i < lines.size(); i++) {
+            body.append(lines.get(i)).append("\n");
+        }
+
+        return new Skill(name, description, body.toString(), skillFile);
     }
 
 
     static String toolCall(ChatCompletionMessageToolCall toolCall)
-        throws IOException, InterruptedException {
+        throws IOException {
 
             String functionName = toolCall.function().name();
 

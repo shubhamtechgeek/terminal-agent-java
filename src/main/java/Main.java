@@ -23,7 +23,7 @@ import java.util.Optional;
 
 public class Main {
 
-    static void main(String[] args) throws IOException {
+    static void main(String[] args) throws IOException, InterruptedException {
         if (args.length < 2 || !"-p".equals(args[0])) {
             System.err.println("Usage: program -p <prompt>");
             System.exit(1);

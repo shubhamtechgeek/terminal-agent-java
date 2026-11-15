@@ -23,8 +23,6 @@ import java.util.Optional;
 
 public class Main {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
-
     static void main(String[] args) throws IOException {
         if (args.length < 2 || !"-p".equals(args[0])) {
             System.err.println("Usage: program -p <prompt>");
@@ -48,7 +46,7 @@ public class Main {
                 .baseUrl(baseUrl)
                 .build();
 
-        FunctionParameters parameters = FunctionParameters.builder()
+        FunctionParameters readParameters = FunctionParameters.builder()
                 .putAdditionalProperty("type", JsonValue.from("object"))
                 .putAdditionalProperty("properties", JsonValue.from(Map.of(
                     "file_path", Map.of(
@@ -59,14 +57,42 @@ public class Main {
                 .putAdditionalProperty("required", JsonValue.from(List.of("file_path")))
                 .build();
 
-        ChatCompletionTool tool =
+
+        FunctionParameters writeParameters = FunctionParameters.builder()
+                .putAdditionalProperty("type", JsonValue.from("object"))
+                .putAdditionalProperty("properties", JsonValue.from(Map.of(
+                    "file_path", Map.of(
+                        "type", "string",
+                        "description", "The path to the file to write to"
+                        ),
+                    "content", Map.of(
+                            "type", "string",
+                            "description", "The content to write to the file")
+                        )
+                ))
+                .putAdditionalProperty("required", JsonValue.from(List.of("file_path", "content")))
+                .build();
+
+        ChatCompletionTool readTool =
             ChatCompletionTool.builder()
                 .type(JsonValue.from("function"))
                 .function(
                     FunctionDefinition.builder()
                         .name("Read")
                         .description("Read and return the contents of a file")
-                        .parameters(parameters)
+                        .parameters(readParameters)
+                        .build())
+                .build();
+
+
+        ChatCompletionTool writeTool =
+            ChatCompletionTool.builder()
+                .type(JsonValue.from("function"))
+                .function(
+                    FunctionDefinition.builder()
+                        .name("Write")
+                        .description("Write Content to a file")
+                        .parameters(writeParameters)
                         .build())
                 .build();
 
@@ -78,6 +104,8 @@ public class Main {
                 .build()
         ));
 
+        List<ChatCompletionTool> tools = List.of(readTool, writeTool);
+
 
         //implement agent loop
         while (true){
@@ -86,7 +114,7 @@ public class Main {
                 ChatCompletionCreateParams.builder()
                     .model("anthropic/claude-haiku-4.5")
                     .messages(messages)
-                    .addTool(tool)
+                    .tools(tools)
                     .build()
             );
 
@@ -137,9 +165,27 @@ public class Main {
                 // 2. Read the file contents and print raw output to stdout
                 return Files.readString(Path.of(filePath));
 
+            } else if ("Write".equals(functionName)) {
+
+                //1. Parse the JSON arguments string
+                String argumentsJson = toolCall.function().arguments();
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode argsNode = mapper.readTree(argumentsJson);
+                String filePath = argsNode.get("file_path").asText();
+                String content = argsNode.get("content").asText();
+                Path path = Path.of(filePath);
+                if(!Files.exists(path)){
+                    Files.createFile(path);
+                    return String.valueOf(Files.writeString(path, content));
+
+
+                }else{
+                    return String.valueOf(Files.writeString(path, content));
+                }
+
             }
 
-            throw new IllegalArgumentException("Unknown tool: " + functionName);
+        throw new IllegalArgumentException("Unknown tool: " + functionName);
     }
 
 }

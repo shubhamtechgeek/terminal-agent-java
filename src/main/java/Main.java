@@ -177,7 +177,8 @@ public class Main {
     }
 
 
-    static String toolCall(ChatCompletionMessageToolCall toolCall) throws IOException {
+    static String toolCall(ChatCompletionMessageToolCall toolCall)
+        throws IOException, InterruptedException {
 
             String functionName = toolCall.function().name();
 
@@ -213,14 +214,24 @@ public class Main {
                 JsonNode argsNode = mapper.readTree(argumentsJson);
                 String command = argsNode.get("command").asText();
 
-                ProcessBuilder processBuilder = new ProcessBuilder(command);
+                //we build a process and enter the command
+                // sh because we have to start a shell
+                ProcessBuilder processBuilder = new ProcessBuilder("sh", "-c", command);
 
-                if (processBuilder.redirectErrorStream()){
+                //no need to capture error or output separately, we can capture it together.
+                processBuilder.redirectErrorStream(true);
 
-                    return processBuilder.redirectError().toString();
-                }else{
+                try {
+                    Process process = processBuilder.start();
+                    String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                    int exitCode = process.waitFor();
 
-                    return processBuilder.redirectOutput().toString();
+                    if (exitCode != 0 && output.isEmpty()) {
+                        return "Command failed with exit code " + exitCode;
+                    }
+                    return output;
+                } catch (Exception e) {
+                    return "Error executing command: " + e.getMessage();
                 }
 
             }

@@ -73,6 +73,18 @@ public class Main {
                 .putAdditionalProperty("required", JsonValue.from(List.of("file_path", "content")))
                 .build();
 
+        FunctionParameters bashParameters = FunctionParameters.builder()
+            .putAdditionalProperty("type", JsonValue.from("object"))
+            .putAdditionalProperty("properties", JsonValue.from(Map.of(
+                    "command", Map.of(
+                        "type", "string",
+                        "description", "the command to execute"
+                    )
+                )
+            ))
+            .putAdditionalProperty("required", JsonValue.from(List.of("command")))
+            .build();
+
         ChatCompletionTool readTool =
             ChatCompletionTool.builder()
                 .type(JsonValue.from("function"))
@@ -96,6 +108,20 @@ public class Main {
                         .build())
                 .build();
 
+
+        ChatCompletionTool bashTool =
+            ChatCompletionTool.builder()
+                .type(JsonValue.from("function"))
+                .function(
+                    FunctionDefinition.builder()
+                        .name("Bash")
+                        .description("Execute a shell command")
+                        .parameters(bashParameters)
+                        .build())
+                .build();
+
+
+
         //initialize conversation
         List<ChatCompletionMessageParam> messages = new ArrayList<>();
         messages.add(ChatCompletionMessageParam.ofUser(
@@ -104,7 +130,7 @@ public class Main {
                 .build()
         ));
 
-        List<ChatCompletionTool> tools = List.of(readTool, writeTool);
+        List<ChatCompletionTool> tools = List.of(readTool, writeTool, bashTool);
 
 
         //implement agent loop
@@ -176,11 +202,25 @@ public class Main {
                 Path path = Path.of(filePath);
                 if(!Files.exists(path)){
                     Files.createFile(path);
-                    return String.valueOf(Files.writeString(path, content));
+                }
+                return String.valueOf(Files.writeString(path, content));
 
+            } else if ("Bash".equals(functionName)) {
 
+                // 1. Parse the JSON arguments string
+                String argumentsJson = toolCall.function().arguments();
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode argsNode = mapper.readTree(argumentsJson);
+                String command = argsNode.get("command").asText();
+
+                ProcessBuilder processBuilder = new ProcessBuilder(command);
+
+                if (processBuilder.redirectErrorStream()){
+
+                    return processBuilder.redirectError().toString();
                 }else{
-                    return String.valueOf(Files.writeString(path, content));
+
+                    return processBuilder.redirectOutput().toString();
                 }
 
             }
